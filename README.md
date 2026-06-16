@@ -26,7 +26,11 @@ cd clipfactory
 docker compose up --build
 ```
 
-The first build takes 5–10 minutes — it's downloading and installing everything. You'll see a lot of output, that's normal. When it settles and you see `backend` and `frontend` lines appearing, it's ready.
+The first build takes 5–10 minutes — it's downloading and installing everything. You'll see a lot of output, that's normal. When you see this line it's ready:
+
+```
+✅  Clip Factory is ready → open http://localhost:4000 in your browser
+```
 
 ### 4. Open the app
 
