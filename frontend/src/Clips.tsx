@@ -808,14 +808,12 @@ export default function Clips() {
               <Toggle on={stretch} onToggle={() => setStretch(p => !p)} label="Stretch to fit" />
             </div>
           </Tooltip>
-          {sources.length >= 2 && (
-            <Tooltip text="Each clip alternates segments from all source videos — mixes them together instead of generating separately">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Layers size={11} color={mixSources ? 'var(--accent)' : 'var(--text-3)'} />
-                <Toggle on={mixSources} onToggle={() => setMixSources(p => !p)} label="Mix sources" />
-              </div>
-            </Tooltip>
-          )}
+          <Tooltip text="Each clip alternates segments from all source videos — mixes them together instead of generating separately">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Layers size={11} color={mixSources ? 'var(--accent)' : 'var(--text-3)'} />
+              <Toggle on={mixSources} onToggle={() => setMixSources(p => !p)} label="Mix sources" />
+            </div>
+          </Tooltip>
         </div>
       </div>
 
