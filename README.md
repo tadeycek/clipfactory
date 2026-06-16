@@ -2,36 +2,63 @@
 
 Download music videos and generate TikTok-ready clips automatically.
 
-## Requirements
-
-- Docker + Docker Compose
-
 ## Setup
 
-```bash
-git clone <repo-url>
+### 1. Install Git
+
+Download and install from **https://git-scm.com/download/win**
+
+During install, keep all the default options.
+
+### 2. Install Docker Desktop
+
+Download and install from **https://www.docker.com/products/docker-desktop**
+
+Once installed, open Docker Desktop and wait for it to fully start (the whale icon in the taskbar stops animating). You may need to restart your PC.
+
+### 3. Clone and run
+
+Open **PowerShell** or **Terminal** and run these commands one by one:
+
+```powershell
+git clone https://github.com/tadeycek/clipfactory
 cd clipfactory
 docker compose up --build
 ```
 
-Open **http://localhost:4000**
+The first build takes 5–10 minutes — it's downloading and installing everything. You'll see a lot of output, that's normal. When it settles and you see `backend` and `frontend` lines appearing, it's ready.
+
+### 4. Open the app
+
+Go to **http://localhost:4000** in your browser.
+
+---
 
 ## Usage
 
-1. Paste a YouTube/video URL and hit **Download**
+1. Paste a YouTube URL into the **Download** box and hit **Download**
 2. Once downloaded, hit **Run** to generate clips
-3. Clips appear in the grid — star your favourites, mark posted ones green
+3. Clips appear in the grid below — star your favourites, mark posted ones green
 4. Download individual clips or grab the whole folder as a ZIP
 
-## Data
+---
 
-All files are stored in `./data/` on your host machine:
-- `data/source_clips/` — downloaded videos (moved to `done/` after processing)
-- `data/output/` — generated clips, organised by video name
-- `data/thumbnails/` — cached thumbnail images
+## Stopping and starting
+
+To stop:
+```powershell
+docker compose down
+```
+
+To start again later (fast, no rebuild):
+```powershell
+docker compose up
+```
+
+---
 
 ## Notes
 
-- First build takes a few minutes (installs ffmpeg, Python deps, Node deps)
-- Processing is CPU-heavy — give it time, watch the log panel for progress
-- Beat Sync requires knowing the BPM — use "From audio file" or "From source video" to detect it automatically
+- All your files are saved in the `data/` folder inside the project — clips, source videos, thumbnails
+- Processing is CPU-heavy, give it time and watch the log panel for progress
+- Beat Sync lets you cut clips exactly on the beat — use **From source video** to detect BPM automatically
