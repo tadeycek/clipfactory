@@ -378,6 +378,91 @@ def index():
     return render_template("index.html")
 
 
+def find_source_for_folder(folder_name):
+    for directory in [SOURCE_DIR, DONE_DIR]:
+        if not os.path.isdir(directory):
+            continue
+        for f in os.listdir(directory):
+            if os.path.splitext(f)[0] == folder_name and f.lower().endswith(VIDEO_EXTENSIONS):
+                return os.path.join(directory, f)
+    return None
+
+
+@app.route("/api/storage")
+def api_storage():
+    def dir_mb(path):
+        total = 0
+        for dirpath, _, files in os.walk(path):
+            for f in files:
+                try: total += os.path.getsize(os.path.join(dirpath, f))
+                except: pass
+        return round(total / 1024 / 1024, 1)
+    source_mb = dir_mb(SOURCE_DIR)
+    output_mb = dir_mb(OUTPUT_DIR)
+    thumb_mb  = dir_mb(THUMB_DIR)
+    return jsonify({
+        "source_mb": source_mb,
+        "output_mb": output_mb,
+        "thumbnails_mb": thumb_mb,
+        "total_mb": round(source_mb + output_mb + thumb_mb, 1),
+    })
+
+
+@app.route("/api/source/<filename>")
+def api_serve_source(filename):
+    for directory in [SOURCE_DIR, DONE_DIR]:
+        path = os.path.join(directory, filename)
+        if os.path.exists(path):
+            return send_from_directory(directory, filename)
+    return jsonify({"error": "not found"}), 404
+
+
+@app.route("/api/regenerate", methods=["POST"])
+def api_regenerate():
+    data        = request.get_json() or {}
+    folder      = data.get("folder", "").strip()
+    clip_index  = data.get("clip_index")
+    if not folder or clip_index is None:
+        return jsonify({"error": "Missing folder or clip_index"}), 400
+    src_path = find_source_for_folder(folder)
+    if not src_path:
+        return jsonify({"error": f"Source video not found for '{folder}'"}), 404
+
+    ratio        = data.get("ratio", "9:16")
+    n_segments   = max(1, min(int(data.get("n_segments", SUB_CLIPS)), 20))
+    seg_duration = max(1.0, min(float(data.get("seg_duration", SEGMENT_DURATION)), 120.0))
+    random_crop  = bool(data.get("random_crop", False))
+    zoom_effect  = bool(data.get("zoom_effect", False))
+    speed_ramp   = bool(data.get("speed_ramp", False))
+    trim_start   = max(0.0, float(data.get("trim_start", 0)))
+    trim_end     = max(0.0, float(data.get("trim_end", 0)))
+    clip_index   = max(0, int(clip_index))
+    if ratio not in ("9:16", "3:4", "4:5", "1:1", "16:9"): ratio = "9:16"
+
+    bpm           = data.get("bpm")
+    beats_per_cut = data.get("beats_per_cut")
+    if bpm and beats_per_cut:
+        seg_duration = round((float(beats_per_cut) * 60.0) / float(bpm), 4)
+
+    jid = new_job("regenerate", {"folder": folder, "clip_index": clip_index})
+
+    def run():
+        try:
+            job_log(jid, f"Regenerating clip_{clip_index}.mp4 for {folder}…")
+            out = make_clip(src_path, clip_index, folder, jid,
+                            seg_duration=seg_duration, n_segments=n_segments, ratio=ratio,
+                            random_crop=random_crop, zoom_effect=zoom_effect, speed_ramp=speed_ramp,
+                            trim_start=trim_start, trim_end=trim_end)
+            job_log(jid, f"Done: {os.path.basename(out)} ✓")
+            job_done(jid, True)
+        except Exception as e:
+            job_log(jid, f"ERROR: {e}")
+            job_done(jid, False)
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"job_id": jid})
+
+
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     if "file" not in request.files:

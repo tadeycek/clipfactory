@@ -5,9 +5,10 @@ import {
   Zap, Move, ZoomIn, Archive,
 } from 'lucide-react'
 
-interface ClipFile   { name: string; size_mb: number }
-interface ClipFolder { folder: string; clips: ClipFile[]; total_mb: number }
-interface SourceFile { name: string; size_mb: number; resolution: string }
+interface ClipFile    { name: string; size_mb: number }
+interface ClipFolder  { folder: string; clips: ClipFile[]; total_mb: number }
+interface SourceFile  { name: string; size_mb: number; resolution: string }
+interface StorageInfo { source_mb: number; output_mb: number; thumbnails_mb: number; total_mb: number }
 
 type JobStatus = 'idle' | 'running' | 'done' | 'error'
 interface Playing { folder: string; clip: ClipFile }
@@ -67,11 +68,47 @@ function VideoModal({ folder, clip, onClose }: { folder: string; clip: ClipFile;
 }
 
 // ---------------------------------------------------------------------------
+// Source preview modal
+// ---------------------------------------------------------------------------
+function SourceModal({ file, onClose }: { file: SourceFile; onClose: () => void }) {
+  const url = `/api/source/${encodeURIComponent(file.name)}`
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 100,
+      background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+      }}>
+        <button onClick={onClose} style={{
+          position: 'absolute', top: -36, right: 0,
+          background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: 4,
+        }}><X size={18} /></button>
+        <video src={url} controls autoPlay style={{
+          maxHeight: '82vh', maxWidth: '92vw', borderRadius: 10, background: '#000',
+        }} />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+            {file.name} · {file.resolution} · {file.size_mb} MB
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Clip card
 // ---------------------------------------------------------------------------
-function ClipCard({ folder, clip, onPlay, onDelete, starred, posted, onToggleStar, onTogglePosted }: {
+function ClipCard({ folder, clip, onPlay, onDelete, onRegenerate, starred, posted, onToggleStar, onTogglePosted }: {
   folder: string; clip: ClipFile
-  onPlay: () => void; onDelete: () => void
+  onPlay: () => void; onDelete: () => void; onRegenerate: () => void
   starred: boolean; posted: boolean
   onToggleStar: () => void; onTogglePosted: () => void
 }) {
@@ -144,6 +181,13 @@ function ClipCard({ folder, clip, onPlay, onDelete, starred, posted, onToggleSta
               background: 'transparent', border: 'none', cursor: 'pointer',
               color: posted ? 'var(--green)' : 'var(--text-3)',
             }}><CheckCircle size={10} /></button>
+          </Tooltip>
+          {/* regenerate */}
+          <Tooltip text="Re-roll — generate a new clip in place using current settings">
+            <button onClick={e => { e.stopPropagation(); onRegenerate() }} style={{
+              display: 'inline-flex', padding: '2px 4px', borderRadius: 4,
+              background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer',
+            }}><RefreshCw size={10} /></button>
           </Tooltip>
           {/* download */}
           <a href={url} download onClick={e => e.stopPropagation()} style={{
@@ -239,8 +283,10 @@ export default function Clips() {
   const [uploading,   setUploading]   = useState(false)
   const [uploadPct,   setUploadPct]   = useState(0)
   const [dragOver,    setDragOver]    = useState(false)
-  const [playing,     setPlaying]     = useState<Playing | null>(null)
-  const [expanded,    setExpanded]    = useState<Set<string>>(new Set())
+  const [playing,       setPlaying]       = useState<Playing | null>(null)
+  const [expanded,      setExpanded]      = useState<Set<string>>(new Set())
+  const [previewSource, setPreviewSource] = useState<SourceFile | null>(null)
+  const [storage,       setStorage]       = useState<StorageInfo | null>(null)
 
   // starred / posted — persisted to localStorage
   const [starred, setStarred] = useState<Set<string>>(() => {
@@ -299,7 +345,12 @@ export default function Clips() {
     setFolders(Array.isArray(data) ? data : [])
   }, [])
 
-  useEffect(() => { refreshSources(); refreshClips() }, [refreshSources, refreshClips])
+  const refreshStorage = useCallback(async () => {
+    const data = await fetch('/api/storage').then(r => r.json()).catch(() => null)
+    if (data) setStorage(data)
+  }, [])
+
+  useEffect(() => { refreshSources(); refreshClips(); refreshStorage() }, [refreshSources, refreshClips, refreshStorage])
 
   function streamJob(jid: string, onDone: () => void) {
     esRef.current?.close()
@@ -381,7 +432,7 @@ export default function Clips() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then(r => r.json())
-    streamJob(job_id, () => { setRunBusy(false); refreshClips(); refreshSources() })
+    streamJob(job_id, () => { setRunBusy(false); refreshClips(); refreshSources(); refreshStorage() })
   }
 
   // keep the ref current
@@ -438,6 +489,28 @@ export default function Clips() {
     refreshClips()
   }
 
+  async function regenerateClip(folder: string, clipName: string) {
+    const match = clipName.match(/clip_(\d+)\.mp4/)
+    if (!match) return
+    const clipIndex = parseInt(match[1])
+    setJobStatus('running')
+    appendLog(`Re-rolling ${clipName}…`, 'info')
+    const body: Record<string, unknown> = {
+      folder, clip_index: clipIndex, ratio,
+      n_segments: parseInt(nSegments),
+      seg_duration: parseFloat(segDur),
+      random_crop: randomCrop, zoom_effect: zoomEffect, speed_ramp: speedRamp,
+    }
+    if (trimStart) body.trim_start = parseFloat(trimStart)
+    if (trimEnd)   body.trim_end   = parseFloat(trimEnd)
+    if (beatSync && bpm) { body.bpm = parseFloat(bpm); body.beats_per_cut = parseInt(beatsPerCut) }
+    const { job_id } = await fetch('/api/regenerate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json())
+    streamJob(job_id, () => { refreshClips(); refreshStorage() })
+  }
+
   function toggleExpanded(folder: string) {
     setExpanded(prev => { const n = new Set(prev); n.has(folder) ? n.delete(folder) : n.add(folder); return n })
   }
@@ -467,6 +540,7 @@ export default function Clips() {
           posted={posted.has(`${folder}/${c.name}`)}
           onPlay={() => setPlaying({ folder, clip: c })}
           onDelete={() => deleteClip(folder, c.name)}
+          onRegenerate={() => regenerateClip(folder, c.name)}
           onToggleStar={() => toggleStar(folder, c.name)}
           onTogglePosted={() => togglePosted(folder, c.name)}
         />
@@ -555,7 +629,10 @@ export default function Clips() {
             {sources.length === 0
               ? <span style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>No videos in source_clips/</span>
               : sources.map(f => (
-                <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5 }}>
+                <div key={f.name} onClick={() => setPreviewSource(f)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5, cursor: 'pointer', transition: 'background .12s' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)') as unknown as void}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent') as unknown as void}>
+                  <Play size={10} color="var(--text-3)" style={{ flexShrink: 0 }} />
                   <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.name}>{f.name}</span>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent)', whiteSpace: 'nowrap', background: 'rgba(129,140,248,0.1)', padding: '1px 6px', borderRadius: 4 }}>{f.resolution}</span>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{f.size_mb} MB</span>
@@ -859,9 +936,13 @@ export default function Clips() {
               Older · {archived.length} {archived.length === 1 ? 'video' : 'videos'}
             </span>
             <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
-              {totalGB.toFixed(2)} GB total
-            </span>
+            {storage && (
+              <Tooltip text={`Source: ${storage.source_mb} MB · Clips: ${storage.output_mb} MB · Thumbnails: ${storage.thumbnails_mb} MB`}>
+                <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', cursor: 'default' }}>
+                  {(storage.total_mb / 1024).toFixed(2)} GB used
+                </span>
+              </Tooltip>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -922,6 +1003,9 @@ export default function Clips() {
 
       {playing && (
         <VideoModal folder={playing.folder} clip={playing.clip} onClose={() => setPlaying(null)} />
+      )}
+      {previewSource && (
+        <SourceModal file={previewSource} onClose={() => setPreviewSource(null)} />
       )}
     </div>
   )
