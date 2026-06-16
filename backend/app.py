@@ -13,7 +13,7 @@ from contextlib import redirect_stdout, redirect_stderr
 from flask import Flask, render_template, request, jsonify, Response, send_from_directory
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024 * 1024
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SOURCE_DIR = os.path.join(BASE_DIR, "source_clips")
@@ -376,6 +376,18 @@ def run_download_job(jid, urls):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    if "file" not in request.files:
+        return jsonify({"error": "No file"}), 400
+    f = request.files["file"]
+    if not f.filename.lower().endswith((".mp4", ".mov", ".mkv", ".webm", ".avi")):
+        return jsonify({"error": "Unsupported format"}), 400
+    dest = os.path.join(SOURCE_DIR, os.path.basename(f.filename))
+    f.save(dest)
+    return jsonify({"ok": True, "name": os.path.basename(f.filename)})
 
 
 @app.route("/api/download", methods=["POST"])

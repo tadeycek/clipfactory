@@ -236,6 +236,9 @@ export default function Clips() {
   const [jobStatus,   setJobStatus]   = useState<JobStatus>('idle')
   const [dlBusy,      setDlBusy]      = useState(false)
   const [runBusy,     setRunBusy]     = useState(false)
+  const [uploading,   setUploading]   = useState(false)
+  const [uploadPct,   setUploadPct]   = useState(0)
+  const [dragOver,    setDragOver]    = useState(false)
   const [playing,     setPlaying]     = useState<Playing | null>(null)
   const [expanded,    setExpanded]    = useState<Set<string>>(new Set())
 
@@ -335,6 +338,28 @@ export default function Clips() {
       refreshSources()
       if (autoProcess) startProcessRef.current?.()
     })
+  }
+
+  function uploadFile(file: File) {
+    if (uploading) return
+    setUploading(true); setUploadPct(0)
+    appendLog(`Uploading ${file.name}…`, 'info')
+    const fd = new FormData(); fd.append('file', file)
+    const xhr = new XMLHttpRequest()
+    xhr.upload.onprogress = e => { if (e.lengthComputable) setUploadPct(Math.round(e.loaded / e.total * 100)) }
+    xhr.onload = () => {
+      setUploading(false); setUploadPct(0)
+      if (xhr.status === 200) {
+        appendLog(`Uploaded: ${file.name}`, 'ok')
+        refreshSources()
+        if (autoProcess) startProcessRef.current?.()
+      } else {
+        appendLog(`Upload failed: ${file.name}`, 'err')
+      }
+    }
+    xhr.onerror = () => { setUploading(false); appendLog('Upload error', 'err') }
+    xhr.open('POST', '/api/upload')
+    xhr.send(fd)
   }
 
   async function startProcess() {
@@ -480,6 +505,41 @@ export default function Clips() {
               <Toggle on={autoProcess} onToggle={() => setAutoProcess(p => !p)} label="Auto-process" />
             </Tooltip>
           </div>
+
+          {/* upload drop zone */}
+          <label
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) uploadFile(f) }}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              marginTop: 10, padding: '10px 14px', borderRadius: 6, cursor: uploading ? 'not-allowed' : 'pointer',
+              border: `1px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+              background: dragOver ? 'rgba(129,140,248,0.06)' : 'transparent',
+              transition: 'all .15s',
+            }}
+          >
+            <input type="file" accept=".mp4,.mov,.mkv,.webm,.avi" style={{ display: 'none' }} disabled={uploading}
+              onChange={e => { const f = e.target.files?.[0]; if (f) uploadFile(f); e.target.value = '' }} />
+            {uploading ? (
+              <>
+                <span className="spinner" />
+                <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>
+                  Uploading… {uploadPct}%
+                </span>
+                <div style={{ flex: 1, height: 2, background: 'var(--border)', borderRadius: 1, overflow: 'hidden', maxWidth: 80 }}>
+                  <div style={{ height: '100%', width: `${uploadPct}%`, background: 'var(--accent)', transition: 'width .2s' }} />
+                </div>
+              </>
+            ) : (
+              <>
+                <Download size={11} color="var(--text-3)" />
+                <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>
+                  Drop a video file or <span style={{ color: 'var(--accent)' }}>browse</span>
+                </span>
+              </>
+            )}
+          </label>
         </div>
 
         <div className="card" style={{ padding: '14px 16px' }}>
