@@ -255,6 +255,8 @@ export default function Clips() {
   const [randomCrop,   setRandomCrop]   = useState(false)
   const [zoomEffect,   setZoomEffect]   = useState(false)
   const [speedRamp,    setSpeedRamp]    = useState(false)
+  const [trimStart,    setTrimStart]    = useState('')
+  const [trimEnd,      setTrimEnd]      = useState('')
 
   // download options
   const [autoProcess,  setAutoProcess]  = useState(false)
@@ -347,6 +349,8 @@ export default function Clips() {
       speed_ramp: speedRamp,
     }
     if (clipsCount && parseInt(clipsCount) !== 6) body.clips_per_video = parseInt(clipsCount)
+    if (trimStart) body.trim_start = parseFloat(trimStart)
+    if (trimEnd)   body.trim_end   = parseFloat(trimEnd)
     if (beatSync && bpm) { body.bpm = parseFloat(bpm); body.beats_per_cut = parseInt(beatsPerCut) }
     const { job_id } = await fetch('/api/process', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -578,6 +582,30 @@ export default function Clips() {
             </Tooltip>
             <input type="number" min="1" max="50" value={clipsCount} onChange={e => setClipsCount(e.target.value)}
               className="clean-input" style={{ width: 60, textAlign: 'center' }} />
+          </div>
+
+          {!isMobile && <div style={{ alignSelf: 'stretch', width: 1, background: 'var(--border)', flexShrink: 0 }} />}
+
+          <div>
+            <Tooltip text="Skip this many seconds at the start — avoids intros">
+              <div className="label" style={{ marginBottom: 6, cursor: 'default' }}>Skip intro</div>
+            </Tooltip>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <input type="number" min="0" step="1" value={trimStart} onChange={e => setTrimStart(e.target.value)}
+                placeholder="0" className="clean-input" style={{ width: 60, textAlign: 'center' }} />
+              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>s</span>
+            </div>
+          </div>
+
+          <div>
+            <Tooltip text="Skip this many seconds at the end — avoids outros">
+              <div className="label" style={{ marginBottom: 6, cursor: 'default' }}>Skip outro</div>
+            </Tooltip>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <input type="number" min="0" step="1" value={trimEnd} onChange={e => setTrimEnd(e.target.value)}
+                placeholder="0" className="clean-input" style={{ width: 60, textAlign: 'center' }} />
+              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>s</span>
+            </div>
           </div>
         </div>
 

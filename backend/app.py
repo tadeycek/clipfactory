@@ -166,16 +166,20 @@ def apply_speed_ramp(clip):
         return clip.with_effects([vfx.MultiplySpeed(factor)])
 
 
-def pick_non_overlapping_segments(video_duration, n, seg_len):
-    if video_duration < seg_len:
-        return [(0.0, min(seg_len, video_duration))] * n
-    if video_duration < n * seg_len:
-        starts = sorted(random.uniform(0, max(0, video_duration - seg_len)) for _ in range(n))
+def pick_non_overlapping_segments(video_duration, n, seg_len, trim_start=0.0, trim_end=0.0):
+    lo = float(trim_start or 0)
+    hi = float(video_duration) - float(trim_end or 0)
+    hi = max(lo + seg_len, hi)
+    available = hi - lo
+    if available < seg_len:
+        return [(lo, lo + min(seg_len, available))] * n
+    if available < n * seg_len:
+        starts = sorted(random.uniform(lo, max(lo, hi - seg_len)) for _ in range(n))
         return [(s, s + seg_len) for s in starts]
-    zone_size = video_duration / n
+    zone_size = available / n
     segments = []
     for i in range(n):
-        zone_start = i * zone_size
+        zone_start = lo + i * zone_size
         zone_end = max(zone_start, zone_start + zone_size - seg_len)
         start = random.uniform(zone_start, zone_end)
         segments.append((start, start + seg_len))
@@ -185,14 +189,15 @@ def pick_non_overlapping_segments(video_duration, n, seg_len):
 
 def make_clip(src_path, clip_index, source_name, jid,
               seg_duration=None, n_segments=None, ratio="9:16",
-              random_crop=False, zoom_effect=False, speed_ramp=False):
+              random_crop=False, zoom_effect=False, speed_ramp=False,
+              trim_start=0.0, trim_end=0.0):
     from moviepy import VideoFileClip, concatenate_videoclips
 
     seg_dur = seg_duration if seg_duration else SEGMENT_DURATION
     n_seg = n_segments if n_segments else SUB_CLIPS
     full_clip = VideoFileClip(src_path)
     try:
-        segments_times = pick_non_overlapping_segments(full_clip.duration, n_seg, seg_dur)
+        segments_times = pick_non_overlapping_segments(full_clip.duration, n_seg, seg_dur, trim_start=trim_start, trim_end=trim_end)
         sub_clips = []
         for start, end in segments_times:
             seg = full_clip.subclipped(start, end)
@@ -226,7 +231,8 @@ def make_clip(src_path, clip_index, source_name, jid,
 
 
 def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segments=None,
-                         ratio="9:16", random_crop=False, zoom_effect=False, speed_ramp=False):
+                         ratio="9:16", random_crop=False, zoom_effect=False, speed_ramp=False,
+                         trim_start=0.0, trim_end=0.0):
     source_name = os.path.splitext(os.path.basename(src_path))[0]
     job_log(jid, f"Processing: {os.path.basename(src_path)}")
     failed = False
@@ -236,7 +242,8 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
         try:
             out = make_clip(src_path, i, source_name, jid,
                             seg_duration=seg_duration, n_segments=n_segments, ratio=ratio,
-                            random_crop=random_crop, zoom_effect=zoom_effect, speed_ramp=speed_ramp)
+                            random_crop=random_crop, zoom_effect=zoom_effect, speed_ramp=speed_ramp,
+                            trim_start=trim_start, trim_end=trim_end)
             job_log(jid, f"  [{i+1}/{n_clips}] {os.path.basename(out)} ✓")
         except Exception as e:
             job_log(jid, f"  [{i+1}/{n_clips}] ERROR: {e}")
@@ -255,7 +262,8 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
 
 def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                     n_segments=None, seg_dur_req=None, ratio="9:16",
-                    random_crop=False, zoom_effect=False, speed_ramp=False):
+                    random_crop=False, zoom_effect=False, speed_ramp=False,
+                    trim_start=0.0, trim_end=0.0):
     try:
         n_clips = clips_per_video if clips_per_video else CLIPS_PER_VIDEO
         n_seg = n_segments if n_segments else SUB_CLIPS
@@ -268,6 +276,9 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
             seg_duration = seg_dur_req if seg_dur_req else SEGMENT_DURATION
             total_dur = round(seg_duration * n_seg, 2)
             job_log(jid, f"Segments: {n_seg} × {seg_duration}s = {total_dur}s · ratio {ratio}")
+
+        if trim_start or trim_end:
+            job_log(jid, f"Trim: skip first {trim_start}s, skip last {trim_end}s")
 
         effects = []
         if random_crop: effects.append("random crop")
@@ -294,7 +305,8 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
             ok = process_source_video(src, jid,
                                       seg_duration=seg_duration, n_clips=n_clips, n_segments=n_seg,
                                       ratio=ratio, random_crop=random_crop,
-                                      zoom_effect=zoom_effect, speed_ramp=speed_ramp)
+                                      zoom_effect=zoom_effect, speed_ramp=speed_ramp,
+                                      trim_start=trim_start, trim_end=trim_end)
             if ok:
                 total_clips += n_clips
             else:
@@ -389,6 +401,8 @@ def api_process():
     random_crop    = bool(data.get("random_crop", False))
     zoom_effect    = bool(data.get("zoom_effect", False))
     speed_ramp     = bool(data.get("speed_ramp", False))
+    trim_start     = data.get("trim_start", 0)
+    trim_end       = data.get("trim_end", 0)
 
     if bpm:             bpm             = float(bpm)
     if beats_per_cut:   beats_per_cut   = int(beats_per_cut)
@@ -396,12 +410,14 @@ def api_process():
     if n_segments:      n_segments      = max(1, min(int(n_segments), 20))
     if seg_dur_req:     seg_dur_req     = max(1.0, min(float(seg_dur_req), 120.0))
     if ratio not in ("9:16", "3:4", "4:5", "1:1", "16:9"): ratio = "9:16"
+    trim_start = max(0.0, float(trim_start or 0))
+    trim_end   = max(0.0, float(trim_end   or 0))
 
     jid = new_job("process", {"ratio": ratio, "clips_per_video": clips_per_video})
     threading.Thread(
         target=run_process_job,
         args=(jid, bpm, beats_per_cut, clips_per_video, n_segments, seg_dur_req,
-              ratio, random_crop, zoom_effect, speed_ramp),
+              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end),
         daemon=True,
     ).start()
     return jsonify({"job_id": jid})
