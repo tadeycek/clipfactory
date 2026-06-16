@@ -100,26 +100,33 @@ def get_video_resolution(path):
 # Video processing
 # ---------------------------------------------------------------------------
 
-def fit_to_ratio(clip, ratio_str="9:16", random_crop=False):
+def fit_to_ratio(clip, ratio_str="9:16", random_crop=False, stretch=False):
     w_part, h_part = (int(x) for x in ratio_str.split(":"))
     target_ratio = w_part / h_part
     clip_ratio = clip.w / clip.h
-    if clip_ratio > target_ratio:
-        new_w = int(clip.h * target_ratio)
-        if random_crop:
-            x_center = clip.w * random.uniform(0.35, 0.65)
-            x_center = max(new_w / 2, min(clip.w - new_w / 2, x_center))
-        else:
-            x_center = clip.w / 2
-        clip = clip.cropped(x1=x_center - new_w / 2, x2=x_center + new_w / 2)
+    if stretch:
+        if abs(clip_ratio - target_ratio) > 0.001:
+            if clip_ratio > target_ratio:
+                clip = clip.resized((int(clip.h * target_ratio), clip.h))
+            else:
+                clip = clip.resized((clip.w, int(clip.w / target_ratio)))
     else:
-        new_h = int(clip.w / target_ratio)
-        if random_crop:
-            y_center = clip.h * random.uniform(0.35, 0.65)
-            y_center = max(new_h / 2, min(clip.h - new_h / 2, y_center))
+        if clip_ratio > target_ratio:
+            new_w = int(clip.h * target_ratio)
+            if random_crop:
+                x_center = clip.w * random.uniform(0.35, 0.65)
+                x_center = max(new_w / 2, min(clip.w - new_w / 2, x_center))
+            else:
+                x_center = clip.w / 2
+            clip = clip.cropped(x1=x_center - new_w / 2, x2=x_center + new_w / 2)
         else:
-            y_center = clip.h / 2
-        clip = clip.cropped(y1=y_center - new_h / 2, y2=y_center + new_h / 2)
+            new_h = int(clip.w / target_ratio)
+            if random_crop:
+                y_center = clip.h * random.uniform(0.35, 0.65)
+                y_center = max(new_h / 2, min(clip.h - new_h / 2, y_center))
+            else:
+                y_center = clip.h / 2
+            clip = clip.cropped(y1=y_center - new_h / 2, y2=y_center + new_h / 2)
     long_side = max(clip.w, clip.h)
     if long_side > MAX_HEIGHT:
         scale = MAX_HEIGHT / long_side
@@ -197,7 +204,7 @@ def pick_non_overlapping_segments(video_duration, n, seg_len, trim_start=0.0, tr
 def make_clip(src_path, clip_index, source_name, jid,
               seg_duration=None, n_segments=None, ratio="9:16",
               random_crop=False, zoom_effect=False, speed_ramp=False,
-              trim_start=0.0, trim_end=0.0, quality="high"):
+              trim_start=0.0, trim_end=0.0, quality="high", stretch=False):
     from moviepy import VideoFileClip, concatenate_videoclips
 
     seg_dur = seg_duration if seg_duration else SEGMENT_DURATION
@@ -208,7 +215,7 @@ def make_clip(src_path, clip_index, source_name, jid,
         sub_clips = []
         for start, end in segments_times:
             seg = full_clip.subclipped(start, end)
-            seg = fit_to_ratio(seg, ratio, random_crop=random_crop)
+            seg = fit_to_ratio(seg, ratio, random_crop=random_crop, stretch=stretch)
             seg = seg.without_audio()
             if zoom_effect:
                 seg = apply_zoom(seg)
@@ -240,7 +247,7 @@ def make_clip(src_path, clip_index, source_name, jid,
 
 def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segments=None,
                          ratio="9:16", random_crop=False, zoom_effect=False, speed_ramp=False,
-                         trim_start=0.0, trim_end=0.0, quality="high"):
+                         trim_start=0.0, trim_end=0.0, quality="high", stretch=False):
     source_name = os.path.splitext(os.path.basename(src_path))[0]
     job_log(jid, f"Processing: {os.path.basename(src_path)}")
     failed = False
@@ -251,7 +258,7 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
             out = make_clip(src_path, i, source_name, jid,
                             seg_duration=seg_duration, n_segments=n_segments, ratio=ratio,
                             random_crop=random_crop, zoom_effect=zoom_effect, speed_ramp=speed_ramp,
-                            trim_start=trim_start, trim_end=trim_end, quality=quality)
+                            trim_start=trim_start, trim_end=trim_end, quality=quality, stretch=stretch)
             job_log(jid, f"  [{i+1}/{n_clips}] {os.path.basename(out)} ✓")
         except Exception as e:
             job_log(jid, f"  [{i+1}/{n_clips}] ERROR: {e}")
@@ -271,7 +278,7 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
 def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                     n_segments=None, seg_dur_req=None, ratio="9:16",
                     random_crop=False, zoom_effect=False, speed_ramp=False,
-                    trim_start=0.0, trim_end=0.0, quality="high"):
+                    trim_start=0.0, trim_end=0.0, quality="high", stretch=False):
     try:
         n_clips = clips_per_video if clips_per_video else CLIPS_PER_VIDEO
         n_seg = n_segments if n_segments else SUB_CLIPS
@@ -290,6 +297,7 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
             job_log(jid, f"Trim: skip first {trim_start}s, skip last {trim_end}s")
 
         effects = []
+        if stretch:      effects.append("stretch to fit")
         if random_crop: effects.append("random crop")
         if zoom_effect:  effects.append("zoom")
         if speed_ramp:   effects.append("speed ramp")
@@ -315,7 +323,8 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                                       seg_duration=seg_duration, n_clips=n_clips, n_segments=n_seg,
                                       ratio=ratio, random_crop=random_crop,
                                       zoom_effect=zoom_effect, speed_ramp=speed_ramp,
-                                      trim_start=trim_start, trim_end=trim_end, quality=quality)
+                                      trim_start=trim_start, trim_end=trim_end, quality=quality,
+                                      stretch=stretch)
             if ok:
                 total_clips += n_clips
             else:
@@ -443,6 +452,7 @@ def api_regenerate():
     random_crop  = bool(data.get("random_crop", False))
     zoom_effect  = bool(data.get("zoom_effect", False))
     speed_ramp   = bool(data.get("speed_ramp", False))
+    stretch      = bool(data.get("stretch", False))
     trim_start   = max(0.0, float(data.get("trim_start", 0)))
     trim_end     = max(0.0, float(data.get("trim_end", 0)))
     quality      = data.get("quality", "high")
@@ -463,7 +473,7 @@ def api_regenerate():
             out = make_clip(src_path, clip_index, folder, jid,
                             seg_duration=seg_duration, n_segments=n_segments, ratio=ratio,
                             random_crop=random_crop, zoom_effect=zoom_effect, speed_ramp=speed_ramp,
-                            trim_start=trim_start, trim_end=trim_end, quality=quality)
+                            trim_start=trim_start, trim_end=trim_end, quality=quality, stretch=stretch)
             job_log(jid, f"Done: {os.path.basename(out)} ✓")
             job_done(jid, True)
         except Exception as e:
@@ -509,6 +519,7 @@ def api_process():
     random_crop    = bool(data.get("random_crop", False))
     zoom_effect    = bool(data.get("zoom_effect", False))
     speed_ramp     = bool(data.get("speed_ramp", False))
+    stretch        = bool(data.get("stretch", False))
     trim_start     = data.get("trim_start", 0)
     trim_end       = data.get("trim_end", 0)
     quality        = data.get("quality", "high")
@@ -527,7 +538,7 @@ def api_process():
     threading.Thread(
         target=run_process_job,
         args=(jid, bpm, beats_per_cut, clips_per_video, n_segments, seg_dur_req,
-              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end, quality),
+              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end, quality, stretch),
         daemon=True,
     ).start()
     return jsonify({"job_id": jid})

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Download, Play, Trash2, RefreshCw, X, Music, Shuffle,
   Folder, ChevronDown, ChevronRight, Star, CheckCircle,
-  Zap, Move, ZoomIn, Archive,
+  Zap, Move, ZoomIn, Archive, Maximize2,
 } from 'lucide-react'
 
 interface ClipFile    { name: string; size_mb: number }
@@ -304,6 +304,7 @@ export default function Clips() {
   const [randomCrop,   setRandomCrop]   = useState(false)
   const [zoomEffect,   setZoomEffect]   = useState(false)
   const [speedRamp,    setSpeedRamp]    = useState(false)
+  const [stretch,      setStretch]      = useState(false)
   const [trimStart,    setTrimStart]    = useState('')
   const [trimEnd,      setTrimEnd]      = useState('')
   const [quality,      setQuality]      = useState('high')
@@ -424,6 +425,7 @@ export default function Clips() {
       random_crop: randomCrop,
       zoom_effect: zoomEffect,
       speed_ramp: speedRamp,
+      stretch,
     }
     if (clipsCount && parseInt(clipsCount) !== 6) body.clips_per_video = parseInt(clipsCount)
     if (trimStart) body.trim_start = parseFloat(trimStart)
@@ -500,7 +502,7 @@ export default function Clips() {
       folder, clip_index: clipIndex, ratio, quality,
       n_segments: parseInt(nSegments),
       seg_duration: parseFloat(segDur),
-      random_crop: randomCrop, zoom_effect: zoomEffect, speed_ramp: speedRamp,
+      random_crop: randomCrop, zoom_effect: zoomEffect, speed_ramp: speedRamp, stretch,
     }
     if (trimStart) body.trim_start = parseFloat(trimStart)
     if (trimEnd)   body.trim_end   = parseFloat(trimEnd)
@@ -795,6 +797,12 @@ export default function Clips() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Zap size={11} color={speedRamp ? 'var(--accent)' : 'var(--text-3)'} />
               <Toggle on={speedRamp} onToggle={() => setSpeedRamp(p => !p)} label="Speed variation" />
+            </div>
+          </Tooltip>
+          <Tooltip text="Squish / stretch video to fill the target ratio — no cropping, keeps every pixel">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Maximize2 size={11} color={stretch ? 'var(--accent)' : 'var(--text-3)'} />
+              <Toggle on={stretch} onToggle={() => setStretch(p => !p)} label="Stretch to fit" />
             </div>
           </Tooltip>
         </div>
