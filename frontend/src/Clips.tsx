@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Download, Play, Trash2, RefreshCw, X, Music, Shuffle,
   Folder, ChevronDown, ChevronRight, Star, CheckCircle,
-  Zap, Move, ZoomIn, Archive, Maximize2,
+  Zap, Move, ZoomIn, Archive, Maximize2, Layers,
 } from 'lucide-react'
 
 interface ClipFile    { name: string; size_mb: number }
@@ -309,6 +309,8 @@ export default function Clips() {
   const [trimEnd,      setTrimEnd]      = useState('')
   const [quality,      setQuality]      = useState('high')
 
+  const [mixSources,   setMixSources]   = useState(false)
+
   // download options
   const [autoProcess,  setAutoProcess]  = useState(false)
 
@@ -426,6 +428,7 @@ export default function Clips() {
       zoom_effect: zoomEffect,
       speed_ramp: speedRamp,
       stretch,
+      mix_sources: mixSources && sources.length >= 2,
     }
     if (clipsCount && parseInt(clipsCount) !== 6) body.clips_per_video = parseInt(clipsCount)
     if (trimStart) body.trim_start = parseFloat(trimStart)
@@ -805,6 +808,14 @@ export default function Clips() {
               <Toggle on={stretch} onToggle={() => setStretch(p => !p)} label="Stretch to fit" />
             </div>
           </Tooltip>
+          {sources.length >= 2 && (
+            <Tooltip text="Each clip alternates segments from all source videos — mixes them together instead of generating separately">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Layers size={11} color={mixSources ? 'var(--accent)' : 'var(--text-3)'} />
+                <Toggle on={mixSources} onToggle={() => setMixSources(p => !p)} label="Mix sources" />
+              </div>
+            </Tooltip>
+          )}
         </div>
       </div>
 

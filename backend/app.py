@@ -245,6 +245,54 @@ def make_clip(src_path, clip_index, source_name, jid,
         full_clip.close()
 
 
+def make_mixed_clip(src_paths, clip_index, source_name, jid,
+                    seg_duration=None, n_segments=None, ratio="9:16",
+                    random_crop=False, zoom_effect=False, speed_ramp=False,
+                    trim_start=0.0, trim_end=0.0, quality="high", stretch=False):
+    from moviepy import VideoFileClip, concatenate_videoclips
+
+    seg_dur = seg_duration if seg_duration else SEGMENT_DURATION
+    n_seg = n_segments if n_segments else SUB_CLIPS
+    open_clips = [VideoFileClip(p) for p in src_paths]
+    try:
+        sub_clips = []
+        for i in range(n_seg):
+            full_clip = open_clips[i % len(open_clips)]
+            start, end = pick_non_overlapping_segments(
+                full_clip.duration, 1, seg_dur, trim_start=trim_start, trim_end=trim_end
+            )[0]
+            seg = full_clip.subclipped(start, end)
+            seg = fit_to_ratio(seg, ratio, random_crop=random_crop, stretch=stretch)
+            seg = seg.without_audio()
+            if zoom_effect:
+                seg = apply_zoom(seg)
+            if speed_ramp:
+                seg = apply_speed_ramp(seg)
+            seg = apply_ug_look(seg)
+            sub_clips.append(seg)
+
+        combined = concatenate_videoclips(sub_clips)
+        folder = os.path.join(OUTPUT_DIR, source_name)
+        os.makedirs(folder, exist_ok=True)
+        out_path = os.path.join(folder, f"clip_{clip_index}.mp4")
+
+        qp = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["high"])
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(buf):
+            combined.write_videofile(
+                out_path, fps=30, codec="libx264", audio=False, logger=None,
+                ffmpeg_params=["-crf", qp["crf"], "-preset", qp["preset"], "-pix_fmt", "yuv420p"],
+            )
+
+        for s in sub_clips:
+            s.close()
+        combined.close()
+        return out_path
+    finally:
+        for c in open_clips:
+            c.close()
+
+
 def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segments=None,
                          ratio="9:16", random_crop=False, zoom_effect=False, speed_ramp=False,
                          trim_start=0.0, trim_end=0.0, quality="high", stretch=False):
@@ -278,7 +326,8 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
 def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                     n_segments=None, seg_dur_req=None, ratio="9:16",
                     random_crop=False, zoom_effect=False, speed_ramp=False,
-                    trim_start=0.0, trim_end=0.0, quality="high", stretch=False):
+                    trim_start=0.0, trim_end=0.0, quality="high", stretch=False,
+                    mix_sources=False):
     try:
         n_clips = clips_per_video if clips_per_video else CLIPS_PER_VIDEO
         n_seg = n_segments if n_segments else SUB_CLIPS
@@ -318,17 +367,41 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
         total_clips = 0
         all_ok = True
 
-        for src in source_files:
-            ok = process_source_video(src, jid,
-                                      seg_duration=seg_duration, n_clips=n_clips, n_segments=n_seg,
-                                      ratio=ratio, random_crop=random_crop,
-                                      zoom_effect=zoom_effect, speed_ramp=speed_ramp,
-                                      trim_start=trim_start, trim_end=trim_end, quality=quality,
-                                      stretch=stretch)
-            if ok:
-                total_clips += n_clips
+        if mix_sources and len(source_files) >= 2:
+            stems = [os.path.splitext(os.path.basename(p))[0] for p in source_files]
+            if len(stems) == 2:
+                source_name = f"{stems[0]}+{stems[1]}"
             else:
+                source_name = f"{stems[0]}+{len(stems)-1}_more"
+            job_log(jid, f"Mix mode: interleaving {len(source_files)} videos → {n_clips} mixed clip(s)")
+            failed = False
+            for i in range(n_clips):
+                try:
+                    out = make_mixed_clip(source_files, i, source_name, jid,
+                                         seg_duration=seg_duration, n_segments=n_seg,
+                                         ratio=ratio, random_crop=random_crop,
+                                         zoom_effect=zoom_effect, speed_ramp=speed_ramp,
+                                         trim_start=trim_start, trim_end=trim_end,
+                                         quality=quality, stretch=stretch)
+                    job_log(jid, f"  [{i+1}/{n_clips}] {os.path.basename(out)} ✓")
+                    total_clips += 1
+                except Exception as e:
+                    job_log(jid, f"  [{i+1}/{n_clips}] ERROR: {e}")
+                    failed = True
+            if failed:
                 all_ok = False
+        else:
+            for src in source_files:
+                ok = process_source_video(src, jid,
+                                          seg_duration=seg_duration, n_clips=n_clips, n_segments=n_seg,
+                                          ratio=ratio, random_crop=random_crop,
+                                          zoom_effect=zoom_effect, speed_ramp=speed_ramp,
+                                          trim_start=trim_start, trim_end=trim_end, quality=quality,
+                                          stretch=stretch)
+                if ok:
+                    total_clips += n_clips
+                else:
+                    all_ok = False
 
         job_log(jid, f"Done. {len(source_files)} video(s) → {total_clips} clip(s) in output/")
         job_done(jid, all_ok)
@@ -520,6 +593,7 @@ def api_process():
     zoom_effect    = bool(data.get("zoom_effect", False))
     speed_ramp     = bool(data.get("speed_ramp", False))
     stretch        = bool(data.get("stretch", False))
+    mix_sources    = bool(data.get("mix_sources", False))
     trim_start     = data.get("trim_start", 0)
     trim_end       = data.get("trim_end", 0)
     quality        = data.get("quality", "high")
@@ -534,11 +608,12 @@ def api_process():
     trim_start = max(0.0, float(trim_start or 0))
     trim_end   = max(0.0, float(trim_end   or 0))
 
-    jid = new_job("process", {"ratio": ratio, "clips_per_video": clips_per_video})
+    jid = new_job("process", {"ratio": ratio, "clips_per_video": clips_per_video, "mix_sources": mix_sources})
     threading.Thread(
         target=run_process_job,
         args=(jid, bpm, beats_per_cut, clips_per_video, n_segments, seg_dur_req,
-              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end, quality, stretch),
+              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end, quality, stretch,
+              mix_sources),
         daemon=True,
     ).start()
     return jsonify({"job_id": jid})
