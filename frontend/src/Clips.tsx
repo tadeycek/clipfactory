@@ -306,6 +306,7 @@ export default function Clips() {
   const [speedRamp,    setSpeedRamp]    = useState(false)
   const [trimStart,    setTrimStart]    = useState('')
   const [trimEnd,      setTrimEnd]      = useState('')
+  const [quality,      setQuality]      = useState('high')
 
   // download options
   const [autoProcess,  setAutoProcess]  = useState(false)
@@ -417,7 +418,7 @@ export default function Clips() {
     setRunBusy(true); setJobStatus('running')
     appendLog('Starting clip generation…', 'info')
     const body: Record<string, unknown> = {
-      ratio,
+      ratio, quality,
       n_segments: parseInt(nSegments),
       seg_duration: parseFloat(segDur),
       random_crop: randomCrop,
@@ -496,7 +497,7 @@ export default function Clips() {
     setJobStatus('running')
     appendLog(`Re-rolling ${clipName}…`, 'info')
     const body: Record<string, unknown> = {
-      folder, clip_index: clipIndex, ratio,
+      folder, clip_index: clipIndex, ratio, quality,
       n_segments: parseInt(nSegments),
       seg_duration: parseFloat(segDur),
       random_crop: randomCrop, zoom_effect: zoomEffect, speed_ramp: speedRamp,
@@ -705,9 +706,16 @@ export default function Clips() {
           <div>
             <div className="label" style={{ marginBottom: 6, visibility: 'hidden' }}>·</div>
             <div style={{ height: 32, display: 'flex', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
-                = {(parseFloat(segDur || '0') * parseInt(nSegments || '0')).toFixed(1)}s total
-              </span>
+              {(() => {
+                const dur = parseFloat(segDur || '0') * parseInt(nSegments || '0')
+                const mbPerSec: Record<string, number> = { draft: 0.15, normal: 0.4, high: 0.9, max: 2.0 }
+                const est = dur * (mbPerSec[quality] ?? 0.9)
+                return (
+                  <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                    = {dur.toFixed(1)}s · ~{est < 1 ? (est * 1000).toFixed(0) + ' KB' : est.toFixed(0) + ' MB'}
+                  </span>
+                )
+              })()}
             </div>
           </div>
 
@@ -742,6 +750,25 @@ export default function Clips() {
               <input type="number" min="0" step="1" value={trimEnd} onChange={e => setTrimEnd(e.target.value)}
                 placeholder="0" className="clean-input" style={{ width: 60, textAlign: 'center' }} />
               <span style={{ fontSize: 11, color: 'var(--text-3)' }}>s</span>
+            </div>
+          </div>
+
+          {!isMobile && <div style={{ alignSelf: 'stretch', width: 1, background: 'var(--border)', flexShrink: 0 }} />}
+
+          <div>
+            <Tooltip text="Higher quality = larger file and slower export. Draft is fast for testing, Max is for final clips.">
+              <div className="label" style={{ marginBottom: 6, cursor: 'default' }}>Quality</div>
+            </Tooltip>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {([['draft', 'Draft'], ['normal', 'Normal'], ['high', 'High'], ['max', 'Max']] as const).map(([q, label]) => (
+                <button key={q} onClick={() => setQuality(q)} style={{
+                  padding: '4px 9px', borderRadius: 5, border: '1px solid',
+                  fontSize: 11, fontFamily: 'var(--font-ui)', cursor: 'pointer',
+                  borderColor: quality === q ? 'rgba(129,140,248,0.5)' : 'var(--border)',
+                  background: quality === q ? 'rgba(129,140,248,0.12)' : 'transparent',
+                  color: quality === q ? 'var(--accent)' : 'var(--text-3)', transition: 'all .15s',
+                }}>{label}</button>
+              ))}
             </div>
           </div>
         </div>

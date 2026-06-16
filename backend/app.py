@@ -31,6 +31,13 @@ STRETCH_FACTOR = 1.15
 CONTRAST_BOOST = 1.2
 VIDEO_EXTENSIONS = (".mp4", ".mov")
 
+QUALITY_PRESETS = {
+    "draft":  {"crf": "28", "preset": "fast"},
+    "normal": {"crf": "23", "preset": "medium"},
+    "high":   {"crf": "18", "preset": "slow"},
+    "max":    {"crf": "14", "preset": "veryslow"},
+}
+
 for d in [SOURCE_DIR, DONE_DIR, OUTPUT_DIR, THUMB_DIR]:
     os.makedirs(d, exist_ok=True)
 
@@ -190,7 +197,7 @@ def pick_non_overlapping_segments(video_duration, n, seg_len, trim_start=0.0, tr
 def make_clip(src_path, clip_index, source_name, jid,
               seg_duration=None, n_segments=None, ratio="9:16",
               random_crop=False, zoom_effect=False, speed_ramp=False,
-              trim_start=0.0, trim_end=0.0):
+              trim_start=0.0, trim_end=0.0, quality="high"):
     from moviepy import VideoFileClip, concatenate_videoclips
 
     seg_dur = seg_duration if seg_duration else SEGMENT_DURATION
@@ -215,11 +222,12 @@ def make_clip(src_path, clip_index, source_name, jid,
         os.makedirs(folder, exist_ok=True)
         out_path = os.path.join(folder, f"clip_{clip_index}.mp4")
 
+        qp = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["high"])
         buf = io.StringIO()
         with redirect_stdout(buf), redirect_stderr(buf):
             combined.write_videofile(
                 out_path, fps=30, codec="libx264", audio=False, logger=None,
-                ffmpeg_params=["-crf", "18", "-preset", "slow", "-pix_fmt", "yuv420p"],
+                ffmpeg_params=["-crf", qp["crf"], "-preset", qp["preset"], "-pix_fmt", "yuv420p"],
             )
 
         for s in sub_clips:
@@ -232,7 +240,7 @@ def make_clip(src_path, clip_index, source_name, jid,
 
 def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segments=None,
                          ratio="9:16", random_crop=False, zoom_effect=False, speed_ramp=False,
-                         trim_start=0.0, trim_end=0.0):
+                         trim_start=0.0, trim_end=0.0, quality="high"):
     source_name = os.path.splitext(os.path.basename(src_path))[0]
     job_log(jid, f"Processing: {os.path.basename(src_path)}")
     failed = False
@@ -243,7 +251,7 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
             out = make_clip(src_path, i, source_name, jid,
                             seg_duration=seg_duration, n_segments=n_segments, ratio=ratio,
                             random_crop=random_crop, zoom_effect=zoom_effect, speed_ramp=speed_ramp,
-                            trim_start=trim_start, trim_end=trim_end)
+                            trim_start=trim_start, trim_end=trim_end, quality=quality)
             job_log(jid, f"  [{i+1}/{n_clips}] {os.path.basename(out)} ✓")
         except Exception as e:
             job_log(jid, f"  [{i+1}/{n_clips}] ERROR: {e}")
@@ -263,7 +271,7 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
 def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                     n_segments=None, seg_dur_req=None, ratio="9:16",
                     random_crop=False, zoom_effect=False, speed_ramp=False,
-                    trim_start=0.0, trim_end=0.0):
+                    trim_start=0.0, trim_end=0.0, quality="high"):
     try:
         n_clips = clips_per_video if clips_per_video else CLIPS_PER_VIDEO
         n_seg = n_segments if n_segments else SUB_CLIPS
@@ -277,6 +285,7 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
             total_dur = round(seg_duration * n_seg, 2)
             job_log(jid, f"Segments: {n_seg} × {seg_duration}s = {total_dur}s · ratio {ratio}")
 
+        job_log(jid, f"Quality: {quality} (CRF {QUALITY_PRESETS[quality]['crf']}, preset {QUALITY_PRESETS[quality]['preset']})")
         if trim_start or trim_end:
             job_log(jid, f"Trim: skip first {trim_start}s, skip last {trim_end}s")
 
@@ -306,7 +315,7 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                                       seg_duration=seg_duration, n_clips=n_clips, n_segments=n_seg,
                                       ratio=ratio, random_crop=random_crop,
                                       zoom_effect=zoom_effect, speed_ramp=speed_ramp,
-                                      trim_start=trim_start, trim_end=trim_end)
+                                      trim_start=trim_start, trim_end=trim_end, quality=quality)
             if ok:
                 total_clips += n_clips
             else:
@@ -436,8 +445,10 @@ def api_regenerate():
     speed_ramp   = bool(data.get("speed_ramp", False))
     trim_start   = max(0.0, float(data.get("trim_start", 0)))
     trim_end     = max(0.0, float(data.get("trim_end", 0)))
+    quality      = data.get("quality", "high")
     clip_index   = max(0, int(clip_index))
     if ratio not in ("9:16", "3:4", "4:5", "1:1", "16:9"): ratio = "9:16"
+    if quality not in QUALITY_PRESETS: quality = "high"
 
     bpm           = data.get("bpm")
     beats_per_cut = data.get("beats_per_cut")
@@ -452,7 +463,7 @@ def api_regenerate():
             out = make_clip(src_path, clip_index, folder, jid,
                             seg_duration=seg_duration, n_segments=n_segments, ratio=ratio,
                             random_crop=random_crop, zoom_effect=zoom_effect, speed_ramp=speed_ramp,
-                            trim_start=trim_start, trim_end=trim_end)
+                            trim_start=trim_start, trim_end=trim_end, quality=quality)
             job_log(jid, f"Done: {os.path.basename(out)} ✓")
             job_done(jid, True)
         except Exception as e:
@@ -500,6 +511,7 @@ def api_process():
     speed_ramp     = bool(data.get("speed_ramp", False))
     trim_start     = data.get("trim_start", 0)
     trim_end       = data.get("trim_end", 0)
+    quality        = data.get("quality", "high")
 
     if bpm:             bpm             = float(bpm)
     if beats_per_cut:   beats_per_cut   = int(beats_per_cut)
@@ -507,6 +519,7 @@ def api_process():
     if n_segments:      n_segments      = max(1, min(int(n_segments), 20))
     if seg_dur_req:     seg_dur_req     = max(1.0, min(float(seg_dur_req), 120.0))
     if ratio not in ("9:16", "3:4", "4:5", "1:1", "16:9"): ratio = "9:16"
+    if quality not in QUALITY_PRESETS: quality = "high"
     trim_start = max(0.0, float(trim_start or 0))
     trim_end   = max(0.0, float(trim_end   or 0))
 
@@ -514,7 +527,7 @@ def api_process():
     threading.Thread(
         target=run_process_job,
         args=(jid, bpm, beats_per_cut, clips_per_video, n_segments, seg_dur_req,
-              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end),
+              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end, quality),
         daemon=True,
     ).start()
     return jsonify({"job_id": jid})
