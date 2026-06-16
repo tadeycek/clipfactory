@@ -59,6 +59,14 @@ To start again later (fast, no rebuild):
 docker compose up
 ```
 
+## Updating to the latest version
+
+```powershell
+docker compose down
+git pull
+docker compose up --build
+```
+
 ---
 
 ## Notes
