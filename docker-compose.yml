@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./backend
+    volumes:
+      - ./data/source_clips:/app/source_clips
+      - ./data/output:/app/output
+      - ./data/thumbnails:/app/thumbnails
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "4000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
