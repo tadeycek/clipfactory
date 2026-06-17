@@ -8,6 +8,7 @@ import {
 interface ClipFile    { name: string; size_mb: number }
 interface ClipFolder  { folder: string; clips: ClipFile[]; total_mb: number }
 interface SourceFile  { name: string; size_mb: number; resolution: string }
+interface DoneFile    { name: string; size_mb: number }
 interface StorageInfo { source_mb: number; output_mb: number; thumbnails_mb: number; total_mb: number }
 
 type JobStatus = 'idle' | 'running' | 'done' | 'error'
@@ -292,6 +293,7 @@ export default function Clips() {
   const isMobile = useIsMobile()
   const [urls,        setUrls]        = useState('')
   const [sources,     setSources]     = useState<SourceFile[]>([])
+  const [doneFiles,   setDoneFiles]   = useState<DoneFile[]>([])
   const [folders,     setFolders]     = useState<ClipFolder[]>([])
   const [logs,        setLogs]        = useState<{ msg: string; kind: 'default'|'ok'|'err'|'info' }[]>(() => {
     try { return JSON.parse(localStorage.getItem('cf_logs') || '[]') } catch { return [] }
@@ -369,6 +371,11 @@ export default function Clips() {
     setSources(data)
   }, [])
 
+  const refreshDone = useCallback(async () => {
+    const data = await fetch('/api/done').then(r => r.json()).catch(() => [])
+    setDoneFiles(data)
+  }, [])
+
   const refreshClips = useCallback(async () => {
     const data = await fetch('/api/clips').then(r => r.json()).catch(() => [])
     setFolders(Array.isArray(data) ? data : [])
@@ -379,7 +386,7 @@ export default function Clips() {
     if (data) setStorage(data)
   }, [])
 
-  useEffect(() => { refreshSources(); refreshClips(); refreshStorage() }, [refreshSources, refreshClips, refreshStorage])
+  useEffect(() => { refreshSources(); refreshClips(); refreshStorage(); refreshDone() }, [refreshSources, refreshClips, refreshStorage, refreshDone])
 
   function streamJob(jid: string, onDone: () => void) {
     esRef.current?.close()
@@ -470,6 +477,7 @@ export default function Clips() {
       refreshClips()
       refreshSources()
       refreshStorage()
+      refreshDone()
       setSelectedSources(new Set())
     })
   }
@@ -542,6 +550,18 @@ export default function Clips() {
     await fetch(`/api/source/${encodeURIComponent(name)}`, { method: 'DELETE' })
     setSelectedSources(prev => { const n = new Set(prev); n.delete(name); return n })
     refreshSources()
+    refreshStorage()
+  }
+
+  async function deleteDoneFile(name: string) {
+    await fetch(`/api/done/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    refreshDone()
+    refreshStorage()
+  }
+
+  async function deleteAllDone() {
+    await fetch('/api/done', { method: 'DELETE' })
+    refreshDone()
     refreshStorage()
   }
 
@@ -754,6 +774,46 @@ export default function Clips() {
           {nSelected > 0 && (
             <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>
               Click checkboxes to select · Run will process only selected files
+            </div>
+          )}
+
+          {/* done files */}
+          {doneFiles.length > 0 && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+                  Done · {doneFiles.length}
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                  {(doneFiles.reduce((s, f) => s + f.size_mb, 0)).toFixed(0)} MB
+                </span>
+                <div style={{ flex: 1 }} />
+                <Tooltip text="Delete all processed source files in done/ folder">
+                  <button onClick={deleteAllDone} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    padding: '3px 8px', borderRadius: 4,
+                    border: '1px solid rgba(239,68,68,0.25)',
+                    background: 'rgba(239,68,68,0.08)', color: 'var(--red)',
+                    fontSize: 11, fontFamily: 'var(--font-ui)', cursor: 'pointer',
+                  }}>
+                    <Trash2 size={10} /> Delete all
+                  </button>
+                </Tooltip>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 100, overflowY: 'auto' }}>
+                {doneFiles.map(f => (
+                  <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 4px', borderRadius: 4 }}>
+                    <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.name}>{f.name}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{f.size_mb} MB</span>
+                    <Tooltip text="Delete this done file">
+                      <button onClick={() => deleteDoneFile(f.name)} style={{
+                        flexShrink: 0, background: 'transparent', border: 'none',
+                        cursor: 'pointer', color: 'var(--text-3)', padding: '1px 3px', borderRadius: 3, display: 'flex',
+                      }}><Trash2 size={10} /></button>
+                    </Tooltip>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

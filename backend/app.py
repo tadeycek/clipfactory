@@ -113,11 +113,11 @@ def fit_to_ratio(clip, ratio_str="9:16", random_crop=False, stretch=False):
     if stretch:
         if abs(clip_ratio - target_ratio) > 0.001:
             if clip_ratio > target_ratio:
-                # wider than target: shrink width to fit
+                # wider than target: squish width to fit ratio
                 new_w = make_even(clip.h * target_ratio)
                 clip = clip.resized((new_w, clip.h))
             else:
-                # taller than target: shrink height to fit
+                # taller than target: squish height to fit ratio
                 new_h = make_even(clip.w / target_ratio)
                 clip = clip.resized((clip.w, new_h))
     else:
@@ -344,8 +344,8 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
 def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                     n_segments=None, seg_dur_req=None, ratio="9:16",
                     random_crop=False, zoom_effect=False, speed_ramp=False,
-                    trim_start=0.0, trim_end=0.0, quality="high", stretch=False,
-                    mix_sources=False, source_files_filter=None, delete_source_after=False):
+                    trim_start=0.0, trim_end=0.0, quality="high", mix_sources=False,
+                    stretch=False, source_files_filter=None, delete_source_after=False):
     try:
         n_clips = clips_per_video if clips_per_video else CLIPS_PER_VIDEO
         n_seg = n_segments if n_segments else SUB_CLIPS
@@ -365,7 +365,7 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
 
         effects = []
         if stretch:      effects.append("stretch to fit")
-        if random_crop: effects.append("random crop")
+        if random_crop:  effects.append("random crop")
         if zoom_effect:  effects.append("zoom")
         if speed_ramp:   effects.append("speed ramp")
         if effects:
@@ -396,10 +396,7 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
 
         if mix_sources and len(source_files) >= 2:
             stems = [os.path.splitext(os.path.basename(p))[0] for p in source_files]
-            if len(stems) == 2:
-                source_name = f"{stems[0]}+{stems[1]}"
-            else:
-                source_name = f"{stems[0]}+{len(stems)-1}_more"
+            source_name = f"{stems[0]}+{stems[1]}" if len(stems) == 2 else f"{stems[0]}+{len(stems)-1}_more"
             job_log(jid, f"Mix mode: interleaving {len(source_files)} videos → {n_clips} mixed clip(s)")
             failed = False
             for i in range(n_clips):
@@ -631,7 +628,7 @@ def api_process():
     trim_start          = data.get("trim_start", 0)
     trim_end            = data.get("trim_end", 0)
     quality             = data.get("quality", "high")
-    source_files_filter = data.get("source_files") or None   # list of filenames or None = all
+    source_files_filter = data.get("source_files") or None
     delete_source_after = bool(data.get("delete_source_after", False))
 
     if bpm:             bpm             = float(bpm)
@@ -648,8 +645,8 @@ def api_process():
     threading.Thread(
         target=run_process_job,
         args=(jid, bpm, beats_per_cut, clips_per_video, n_segments, seg_dur_req,
-              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end, quality, stretch,
-              mix_sources, source_files_filter, delete_source_after),
+              ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end, quality,
+              mix_sources, stretch, source_files_filter, delete_source_after),
         daemon=True,
     ).start()
     return jsonify({"job_id": jid})
@@ -854,6 +851,41 @@ def api_source():
                 "resolution": f"{w}×{h}" if w else "?",
             })
     return jsonify(files)
+
+
+@app.route("/api/done")
+def api_done():
+    files = []
+    if os.path.isdir(DONE_DIR):
+        for f in sorted(os.listdir(DONE_DIR)):
+            path = os.path.join(DONE_DIR, f)
+            if f.lower().endswith(VIDEO_EXTENSIONS) and os.path.isfile(path):
+                files.append({
+                    "name": f,
+                    "size_mb": round(os.path.getsize(path) / 1024 / 1024, 1),
+                })
+    return jsonify(files)
+
+
+@app.route("/api/done", methods=["DELETE"])
+def api_delete_all_done():
+    deleted = 0
+    if os.path.isdir(DONE_DIR):
+        for f in os.listdir(DONE_DIR):
+            path = os.path.join(DONE_DIR, f)
+            if f.lower().endswith(VIDEO_EXTENSIONS) and os.path.isfile(path):
+                os.remove(path)
+                deleted += 1
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.route("/api/done/<filename>", methods=["DELETE"])
+def api_delete_done(filename):
+    path = os.path.join(DONE_DIR, os.path.basename(filename))
+    if os.path.exists(path):
+        os.remove(path)
+        return jsonify({"ok": True})
+    return jsonify({"error": "File not found"}), 404
 
 
 if __name__ == "__main__":
