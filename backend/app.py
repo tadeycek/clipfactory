@@ -100,6 +100,12 @@ def get_video_resolution(path):
 # Video processing
 # ---------------------------------------------------------------------------
 
+def make_even(n):
+    """Round down to nearest even integer — required for H.264 encoding."""
+    n = int(n)
+    return n if n % 2 == 0 else n - 1
+
+
 def fit_to_ratio(clip, ratio_str="9:16", random_crop=False, stretch=False):
     w_part, h_part = (int(x) for x in ratio_str.split(":"))
     target_ratio = w_part / h_part
@@ -107,12 +113,16 @@ def fit_to_ratio(clip, ratio_str="9:16", random_crop=False, stretch=False):
     if stretch:
         if abs(clip_ratio - target_ratio) > 0.001:
             if clip_ratio > target_ratio:
-                clip = clip.resized((int(clip.h * target_ratio), clip.h))
+                # wider than target: shrink width to fit
+                new_w = make_even(clip.h * target_ratio)
+                clip = clip.resized((new_w, clip.h))
             else:
-                clip = clip.resized((clip.w, int(clip.w / target_ratio)))
+                # taller than target: shrink height to fit
+                new_h = make_even(clip.w / target_ratio)
+                clip = clip.resized((clip.w, new_h))
     else:
         if clip_ratio > target_ratio:
-            new_w = int(clip.h * target_ratio)
+            new_w = make_even(clip.h * target_ratio)
             if random_crop:
                 x_center = clip.w * random.uniform(0.35, 0.65)
                 x_center = max(new_w / 2, min(clip.w - new_w / 2, x_center))
@@ -120,7 +130,7 @@ def fit_to_ratio(clip, ratio_str="9:16", random_crop=False, stretch=False):
                 x_center = clip.w / 2
             clip = clip.cropped(x1=x_center - new_w / 2, x2=x_center + new_w / 2)
         else:
-            new_h = int(clip.w / target_ratio)
+            new_h = make_even(clip.w / target_ratio)
             if random_crop:
                 y_center = clip.h * random.uniform(0.35, 0.65)
                 y_center = max(new_h / 2, min(clip.h - new_h / 2, y_center))
@@ -130,14 +140,14 @@ def fit_to_ratio(clip, ratio_str="9:16", random_crop=False, stretch=False):
     long_side = max(clip.w, clip.h)
     if long_side > MAX_HEIGHT:
         scale = MAX_HEIGHT / long_side
-        clip = clip.resized((int(clip.w * scale), int(clip.h * scale)))
+        clip = clip.resized((make_even(clip.w * scale), make_even(clip.h * scale)))
     return clip
 
 
 def apply_ug_look(clip):
     import numpy as np
     w, h = clip.size
-    stretched_h = int(h * STRETCH_FACTOR)
+    stretched_h = make_even(h * STRETCH_FACTOR)
     clip = clip.resized((w, stretched_h))
     y_center = stretched_h / 2
     clip = clip.cropped(y1=y_center - h / 2, y2=y_center + h / 2)
@@ -295,7 +305,8 @@ def make_mixed_clip(src_paths, clip_index, source_name, jid,
 
 def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segments=None,
                          ratio="9:16", random_crop=False, zoom_effect=False, speed_ramp=False,
-                         trim_start=0.0, trim_end=0.0, quality="high", stretch=False):
+                         trim_start=0.0, trim_end=0.0, quality="high", stretch=False,
+                         delete_source_after=False):
     source_name = os.path.splitext(os.path.basename(src_path))[0]
     job_log(jid, f"Processing: {os.path.basename(src_path)}")
     failed = False
@@ -313,10 +324,17 @@ def process_source_video(src_path, jid, seg_duration=None, n_clips=None, n_segme
             failed = True
 
     if not failed:
-        os.makedirs(DONE_DIR, exist_ok=True)
-        dest = os.path.join(DONE_DIR, os.path.basename(src_path))
-        shutil.move(src_path, dest)
-        job_log(jid, f"  Moved to done/: {os.path.basename(src_path)}")
+        if delete_source_after:
+            try:
+                os.remove(src_path)
+                job_log(jid, f"  Deleted source: {os.path.basename(src_path)}")
+            except Exception as e:
+                job_log(jid, f"  Could not delete source: {e}")
+        else:
+            os.makedirs(DONE_DIR, exist_ok=True)
+            dest = os.path.join(DONE_DIR, os.path.basename(src_path))
+            shutil.move(src_path, dest)
+            job_log(jid, f"  Moved to done/: {os.path.basename(src_path)}")
     else:
         job_log(jid, f"  Errors occurred — source NOT moved to done/")
 
@@ -327,7 +345,7 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                     n_segments=None, seg_dur_req=None, ratio="9:16",
                     random_crop=False, zoom_effect=False, speed_ramp=False,
                     trim_start=0.0, trim_end=0.0, quality="high", stretch=False,
-                    mix_sources=False):
+                    mix_sources=False, source_files_filter=None, delete_source_after=False):
     try:
         n_clips = clips_per_video if clips_per_video else CLIPS_PER_VIDEO
         n_seg = n_segments if n_segments else SUB_CLIPS
@@ -353,11 +371,20 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
         if effects:
             job_log(jid, f"Effects: {', '.join(effects)}")
 
-        source_files = [
+        all_source_files = [
             os.path.join(SOURCE_DIR, f)
             for f in os.listdir(SOURCE_DIR)
             if f.lower().endswith(VIDEO_EXTENSIONS) and os.path.isfile(os.path.join(SOURCE_DIR, f))
         ]
+        if source_files_filter:
+            source_files = [p for p in all_source_files if os.path.basename(p) in source_files_filter]
+            if not source_files:
+                job_log(jid, "None of the selected files were found in source_clips/")
+                job_done(jid, False)
+                return
+        else:
+            source_files = all_source_files
+
         if not source_files:
             job_log(jid, "No video files found in source_clips/")
             job_done(jid, False)
@@ -390,6 +417,13 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                     failed = True
             if failed:
                 all_ok = False
+            elif delete_source_after:
+                for src in source_files:
+                    try:
+                        os.remove(src)
+                        job_log(jid, f"  Deleted source: {os.path.basename(src)}")
+                    except Exception as e:
+                        job_log(jid, f"  Could not delete source: {e}")
         else:
             for src in source_files:
                 ok = process_source_video(src, jid,
@@ -397,7 +431,7 @@ def run_process_job(jid, bpm=None, beats_per_cut=None, clips_per_video=None,
                                           ratio=ratio, random_crop=random_crop,
                                           zoom_effect=zoom_effect, speed_ramp=speed_ramp,
                                           trim_start=trim_start, trim_end=trim_end, quality=quality,
-                                          stretch=stretch)
+                                          stretch=stretch, delete_source_after=delete_source_after)
                 if ok:
                     total_clips += n_clips
                 else:
@@ -583,20 +617,22 @@ def api_download():
 @app.route("/api/process", methods=["POST"])
 def api_process():
     data = request.get_json() or {}
-    bpm            = data.get("bpm")
-    beats_per_cut  = data.get("beats_per_cut")
-    clips_per_video= data.get("clips_per_video")
-    n_segments     = data.get("n_segments")
-    seg_dur_req    = data.get("seg_duration")
-    ratio          = data.get("ratio", "9:16")
-    random_crop    = bool(data.get("random_crop", False))
-    zoom_effect    = bool(data.get("zoom_effect", False))
-    speed_ramp     = bool(data.get("speed_ramp", False))
-    stretch        = bool(data.get("stretch", False))
-    mix_sources    = bool(data.get("mix_sources", False))
-    trim_start     = data.get("trim_start", 0)
-    trim_end       = data.get("trim_end", 0)
-    quality        = data.get("quality", "high")
+    bpm                 = data.get("bpm")
+    beats_per_cut       = data.get("beats_per_cut")
+    clips_per_video     = data.get("clips_per_video")
+    n_segments          = data.get("n_segments")
+    seg_dur_req         = data.get("seg_duration")
+    ratio               = data.get("ratio", "9:16")
+    random_crop         = bool(data.get("random_crop", False))
+    zoom_effect         = bool(data.get("zoom_effect", False))
+    speed_ramp          = bool(data.get("speed_ramp", False))
+    stretch             = bool(data.get("stretch", False))
+    mix_sources         = bool(data.get("mix_sources", False))
+    trim_start          = data.get("trim_start", 0)
+    trim_end            = data.get("trim_end", 0)
+    quality             = data.get("quality", "high")
+    source_files_filter = data.get("source_files") or None   # list of filenames or None = all
+    delete_source_after = bool(data.get("delete_source_after", False))
 
     if bpm:             bpm             = float(bpm)
     if beats_per_cut:   beats_per_cut   = int(beats_per_cut)
@@ -613,10 +649,19 @@ def api_process():
         target=run_process_job,
         args=(jid, bpm, beats_per_cut, clips_per_video, n_segments, seg_dur_req,
               ratio, random_crop, zoom_effect, speed_ramp, trim_start, trim_end, quality, stretch,
-              mix_sources),
+              mix_sources, source_files_filter, delete_source_after),
         daemon=True,
     ).start()
     return jsonify({"job_id": jid})
+
+
+@app.route("/api/source/<filename>", methods=["DELETE"])
+def api_delete_source(filename):
+    path = os.path.join(SOURCE_DIR, os.path.basename(filename))
+    if os.path.exists(path):
+        os.remove(path)
+        return jsonify({"ok": True})
+    return jsonify({"error": "File not found"}), 404
 
 
 @app.route("/api/analyze", methods=["POST"])

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Download, Play, Trash2, RefreshCw, X, Music, Shuffle,
   Folder, ChevronDown, ChevronRight, Star, CheckCircle,
-  Zap, Move, ZoomIn, Archive, Maximize2, Layers,
+  Zap, Move, ZoomIn, Archive, Maximize2, Layers, Square, CheckSquare,
 } from 'lucide-react'
 
 interface ClipFile    { name: string; size_mb: number }
@@ -106,11 +106,12 @@ function SourceModal({ file, onClose }: { file: SourceFile; onClose: () => void 
 // ---------------------------------------------------------------------------
 // Clip card
 // ---------------------------------------------------------------------------
-function ClipCard({ folder, clip, onPlay, onDelete, onRegenerate, starred, posted, onToggleStar, onTogglePosted }: {
+function ClipCard({ folder, clip, onPlay, onDelete, onRegenerate, starred, posted, onToggleStar, onTogglePosted, selectMode, selected, onToggleSelect }: {
   folder: string; clip: ClipFile
   onPlay: () => void; onDelete: () => void; onRegenerate: () => void
   starred: boolean; posted: boolean
   onToggleStar: () => void; onTogglePosted: () => void
+  selectMode: boolean; selected: boolean; onToggleSelect: () => void
 }) {
   const url     = `/api/clips/${encodeURIComponent(folder)}/${encodeURIComponent(clip.name)}`
   const thumbUrl= `/api/thumbnails/${encodeURIComponent(folder)}/${encodeURIComponent(clip.name)}`
@@ -120,14 +121,14 @@ function ClipCard({ folder, clip, onPlay, onDelete, onRegenerate, starred, poste
     <div
       style={{
         background: 'rgba(255,255,255,0.02)', borderRadius: 6,
-        border: `1px solid ${starred ? 'rgba(251,191,36,0.35)' : posted ? 'rgba(74,222,128,0.25)' : 'var(--border)'}`,
+        border: `1px solid ${selected ? 'rgba(129,140,248,0.5)' : starred ? 'rgba(251,191,36,0.35)' : posted ? 'rgba(74,222,128,0.25)' : 'var(--border)'}`,
         transition: 'border-color .15s',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       {/* thumbnail */}
-      <div onClick={onPlay} style={{
+      <div onClick={selectMode ? onToggleSelect : onPlay} style={{
         width: '100%', aspectRatio: '3/4', cursor: 'pointer',
         position: 'relative', overflow: 'hidden', background: '#0a0a0a',
         borderRadius: '5px 5px 0 0',
@@ -135,7 +136,7 @@ function ClipCard({ folder, clip, onPlay, onDelete, onRegenerate, starred, poste
         <img src={thumbUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
 
         {/* posted badge */}
-        {posted && (
+        {posted && !selectMode && (
           <div style={{
             position: 'absolute', top: 6, left: 6,
             background: 'rgba(74,222,128,0.85)', borderRadius: 99,
@@ -144,20 +145,36 @@ function ClipCard({ folder, clip, onPlay, onDelete, onRegenerate, starred, poste
           }}>POSTED</div>
         )}
 
-        {/* play overlay */}
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: hovered ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0)', transition: 'background .15s',
-        }}>
+        {/* select checkbox overlay */}
+        {selectMode && (
           <div style={{
-            width: 32, height: 32, borderRadius: '50%',
-            background: hovered ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.45)',
-            backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background .15s',
+            position: 'absolute', top: 6, left: 6,
+            width: 20, height: 20, borderRadius: 4,
+            background: selected ? 'var(--accent)' : 'rgba(0,0,0,0.6)',
+            border: `2px solid ${selected ? 'var(--accent)' : 'rgba(255,255,255,0.4)'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all .12s',
           }}>
-            <Play size={13} fill="#fff" color="#fff" style={{ marginLeft: 2 }} />
+            {selected && <CheckSquare size={12} color="#fff" />}
           </div>
-        </div>
+        )}
+
+        {/* play overlay (only when not in select mode) */}
+        {!selectMode && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: hovered ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0)', transition: 'background .15s',
+          }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: hovered ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.45)',
+              backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background .15s',
+            }}>
+              <Play size={13} fill="#fff" color="#fff" style={{ marginLeft: 2 }} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* footer */}
@@ -166,40 +183,42 @@ function ClipCard({ folder, clip, onPlay, onDelete, onRegenerate, starred, poste
           <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
             {clip.size_mb} MB
           </span>
-          {/* star */}
-          <Tooltip text={starred ? 'Unfavourite' : 'Favourite — floats to top of grid'}>
-            <button onClick={e => { e.stopPropagation(); onToggleStar() }} style={{
-              display: 'inline-flex', padding: '2px 4px', borderRadius: 4,
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              color: starred ? '#fbbf24' : 'var(--text-3)',
-            }}><Star size={10} fill={starred ? '#fbbf24' : 'none'} /></button>
-          </Tooltip>
-          {/* posted */}
-          <Tooltip text={posted ? 'Mark as not posted' : 'Mark as posted to TikTok'}>
-            <button onClick={e => { e.stopPropagation(); onTogglePosted() }} style={{
-              display: 'inline-flex', padding: '2px 4px', borderRadius: 4,
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              color: posted ? 'var(--green)' : 'var(--text-3)',
-            }}><CheckCircle size={10} /></button>
-          </Tooltip>
-          {/* regenerate */}
-          <Tooltip text="Re-roll — generate a new clip in place using current settings">
-            <button onClick={e => { e.stopPropagation(); onRegenerate() }} style={{
+          {!selectMode && <>
+            {/* star */}
+            <Tooltip text={starred ? 'Unfavourite' : 'Favourite — floats to top of grid'}>
+              <button onClick={e => { e.stopPropagation(); onToggleStar() }} style={{
+                display: 'inline-flex', padding: '2px 4px', borderRadius: 4,
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: starred ? '#fbbf24' : 'var(--text-3)',
+              }}><Star size={10} fill={starred ? '#fbbf24' : 'none'} /></button>
+            </Tooltip>
+            {/* posted */}
+            <Tooltip text={posted ? 'Mark as not posted' : 'Mark as posted to TikTok'}>
+              <button onClick={e => { e.stopPropagation(); onTogglePosted() }} style={{
+                display: 'inline-flex', padding: '2px 4px', borderRadius: 4,
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: posted ? 'var(--green)' : 'var(--text-3)',
+              }}><CheckCircle size={10} /></button>
+            </Tooltip>
+            {/* regenerate */}
+            <Tooltip text="Re-roll — generate a new clip in place using current settings">
+              <button onClick={e => { e.stopPropagation(); onRegenerate() }} style={{
+                display: 'inline-flex', padding: '2px 4px', borderRadius: 4,
+                background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer',
+              }}><RefreshCw size={10} /></button>
+            </Tooltip>
+            {/* download */}
+            <a href={url} download onClick={e => e.stopPropagation()} style={{
+              display: 'inline-flex', padding: '2px 5px', borderRadius: 4,
+              background: 'transparent', border: '1px solid var(--border)',
+              color: 'var(--text-3)', textDecoration: 'none', cursor: 'pointer',
+            }}><Download size={10} /></a>
+            {/* delete */}
+            <button onClick={e => { e.stopPropagation(); onDelete() }} style={{
               display: 'inline-flex', padding: '2px 4px', borderRadius: 4,
               background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer',
-            }}><RefreshCw size={10} /></button>
-          </Tooltip>
-          {/* download */}
-          <a href={url} download onClick={e => e.stopPropagation()} style={{
-            display: 'inline-flex', padding: '2px 5px', borderRadius: 4,
-            background: 'transparent', border: '1px solid var(--border)',
-            color: 'var(--text-3)', textDecoration: 'none', cursor: 'pointer',
-          }}><Download size={10} /></a>
-          {/* delete */}
-          <button onClick={e => { e.stopPropagation(); onDelete() }} style={{
-            display: 'inline-flex', padding: '2px 4px', borderRadius: 4,
-            background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer',
-          }}><Trash2 size={10} /></button>
+            }}><Trash2 size={10} /></button>
+          </>}
         </div>
       </div>
     </div>
@@ -288,6 +307,13 @@ export default function Clips() {
   const [previewSource, setPreviewSource] = useState<SourceFile | null>(null)
   const [storage,       setStorage]       = useState<StorageInfo | null>(null)
 
+  // source selection
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set())
+
+  // clip bulk-select
+  const [selectClipsMode, setSelectClipsMode] = useState(false)
+  const [selectedClips,   setSelectedClips]   = useState<Set<string>>(new Set())
+
   // starred / posted — persisted to localStorage
   const [starred, setStarred] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('cf_starred') || '[]')) } catch { return new Set() }
@@ -308,8 +334,8 @@ export default function Clips() {
   const [trimStart,    setTrimStart]    = useState('')
   const [trimEnd,      setTrimEnd]      = useState('')
   const [quality,      setQuality]      = useState('high')
-
   const [mixSources,   setMixSources]   = useState(false)
+  const [deleteSourceAfter, setDeleteSourceAfter] = useState(false)
 
   // download options
   const [autoProcess,  setAutoProcess]  = useState(false)
@@ -324,7 +350,6 @@ export default function Clips() {
   const logRef = useRef<HTMLDivElement>(null)
   const esRef  = useRef<EventSource | null>(null)
 
-  // Keep startProcess accessible from the download callback
   const startProcessRef = useRef<(() => void) | null>(null)
 
   const appendLog = useCallback((msg: string, kind: 'default'|'ok'|'err'|'info' = 'default') => {
@@ -428,20 +453,27 @@ export default function Clips() {
       zoom_effect: zoomEffect,
       speed_ramp: speedRamp,
       stretch,
-      mix_sources: mixSources && sources.length >= 2,
+      mix_sources: mixSources,
+      delete_source_after: deleteSourceAfter,
     }
     if (clipsCount && parseInt(clipsCount) !== 6) body.clips_per_video = parseInt(clipsCount)
     if (trimStart) body.trim_start = parseFloat(trimStart)
     if (trimEnd)   body.trim_end   = parseFloat(trimEnd)
     if (beatSync && bpm) { body.bpm = parseFloat(bpm); body.beats_per_cut = parseInt(beatsPerCut) }
+    if (selectedSources.size > 0) body.source_files = [...selectedSources]
     const { job_id } = await fetch('/api/process', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then(r => r.json())
-    streamJob(job_id, () => { setRunBusy(false); refreshClips(); refreshSources(); refreshStorage() })
+    streamJob(job_id, () => {
+      setRunBusy(false)
+      refreshClips()
+      refreshSources()
+      refreshStorage()
+      setSelectedSources(new Set())
+    })
   }
 
-  // keep the ref current
   useEffect(() => { startProcessRef.current = startProcess })
 
   async function analyzeAudio(file: File) {
@@ -495,6 +527,41 @@ export default function Clips() {
     refreshClips()
   }
 
+  async function deleteSelectedClips() {
+    const keys = [...selectedClips]
+    await Promise.all(keys.map(key => {
+      const [folder, name] = key.split('/', 2)
+      return fetch(`/api/clips/${encodeURIComponent(folder)}/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    }))
+    setSelectedClips(new Set())
+    setSelectClipsMode(false)
+    refreshClips()
+  }
+
+  async function deleteSource(name: string) {
+    await fetch(`/api/source/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    setSelectedSources(prev => { const n = new Set(prev); n.delete(name); return n })
+    refreshSources()
+    refreshStorage()
+  }
+
+  function toggleSourceSelect(name: string) {
+    setSelectedSources(prev => {
+      const n = new Set(prev)
+      n.has(name) ? n.delete(name) : n.add(name)
+      return n
+    })
+  }
+
+  function toggleClipSelect(folder: string, name: string) {
+    const key = `${folder}/${name}`
+    setSelectedClips(prev => {
+      const n = new Set(prev)
+      n.has(key) ? n.delete(key) : n.add(key)
+      return n
+    })
+  }
+
   async function regenerateClip(folder: string, clipName: string) {
     const match = clipName.match(/clip_(\d+)\.mp4/)
     if (!match) return
@@ -531,7 +598,6 @@ export default function Clips() {
 
   const latest   = folders[0] ?? null
   const archived = folders.slice(1)
-  const totalGB  = folders.reduce((s, f) => s + f.total_mb, 0) / 1024
 
   const dotColor    = jobStatus === 'running' ? 'var(--orange)' : jobStatus === 'done' ? 'var(--green)' : jobStatus === 'error' ? 'var(--red)' : 'var(--text-3)'
   const statusLabel = jobStatus === 'running' ? 'Running…' : jobStatus === 'done' ? 'Done' : jobStatus === 'error' ? 'Error' : 'Idle'
@@ -544,15 +610,21 @@ export default function Clips() {
           folder={folder} clip={c}
           starred={starred.has(`${folder}/${c.name}`)}
           posted={posted.has(`${folder}/${c.name}`)}
+          selectMode={selectClipsMode}
+          selected={selectedClips.has(`${folder}/${c.name}`)}
           onPlay={() => setPlaying({ folder, clip: c })}
           onDelete={() => deleteClip(folder, c.name)}
           onRegenerate={() => regenerateClip(folder, c.name)}
           onToggleStar={() => toggleStar(folder, c.name)}
           onTogglePosted={() => togglePosted(folder, c.name)}
+          onToggleSelect={() => toggleClipSelect(folder, c.name)}
         />
       ))}
     </div>
   )
+
+  const nSelected = selectedSources.size
+  const runLabel  = nSelected > 0 ? `Run (${nSelected} selected)` : 'Run'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -622,11 +694,19 @@ export default function Clips() {
           </label>
         </div>
 
+        {/* ── Source clips ──────────────────────────────────────────────── */}
         <div className="card" style={{ padding: '14px 16px' }}>
           <div className="section-header">
             <span className="label">Source clips</span>
             <span className="section-header rule" />
             <span className="section-header count">{sources.length}</span>
+            {nSelected > 0 && (
+              <span style={{
+                fontSize: 10, color: 'var(--accent)', fontFamily: 'var(--font-mono)',
+                background: 'rgba(129,140,248,0.12)', border: '1px solid rgba(129,140,248,0.2)',
+                padding: '1px 7px', borderRadius: 99,
+              }}>{nSelected} selected</span>
+            )}
             <button onClick={refreshSources} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}>
               <RefreshCw size={11} />
             </button>
@@ -634,18 +714,48 @@ export default function Clips() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 160, overflowY: 'auto' }}>
             {sources.length === 0
               ? <span style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>No videos in source_clips/</span>
-              : sources.map(f => (
-                <div key={f.name} onClick={() => setPreviewSource(f)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5, cursor: 'pointer', transition: 'background .12s' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)') as unknown as void}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent') as unknown as void}>
-                  <Play size={10} color="var(--text-3)" style={{ flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.name}>{f.name}</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent)', whiteSpace: 'nowrap', background: 'rgba(129,140,248,0.1)', padding: '1px 6px', borderRadius: 4 }}>{f.resolution}</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{f.size_mb} MB</span>
-                </div>
-              ))
+              : sources.map(f => {
+                const isSel = selectedSources.has(f.name)
+                return (
+                  <div key={f.name} style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px',
+                    borderRadius: 5, transition: 'background .12s',
+                    background: isSel ? 'rgba(129,140,248,0.07)' : 'transparent',
+                  }}
+                    onMouseEnter={e => { if (!isSel) (e.currentTarget.style.background = 'rgba(255,255,255,0.04)') }}
+                    onMouseLeave={e => { (e.currentTarget.style.background = isSel ? 'rgba(129,140,248,0.07)' : 'transparent') }}
+                  >
+                    {/* checkbox to select for processing */}
+                    <button onClick={() => toggleSourceSelect(f.name)} style={{
+                      flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer',
+                      color: isSel ? 'var(--accent)' : 'var(--text-3)', padding: 0, display: 'flex',
+                    }}>
+                      {isSel ? <CheckSquare size={13} /> : <Square size={13} />}
+                    </button>
+                    {/* preview on click */}
+                    <div onClick={() => setPreviewSource(f)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', overflow: 'hidden' }}>
+                      <Play size={10} color="var(--text-3)" style={{ flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.name}>{f.name}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent)', whiteSpace: 'nowrap', background: 'rgba(129,140,248,0.1)', padding: '1px 6px', borderRadius: 4 }}>{f.resolution}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{f.size_mb} MB</span>
+                    </div>
+                    {/* delete source */}
+                    <Tooltip text="Delete source file">
+                      <button onClick={() => deleteSource(f.name)} style={{
+                        flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer',
+                        color: 'var(--text-3)', padding: '2px 4px', borderRadius: 4, display: 'flex',
+                      }}><Trash2 size={11} /></button>
+                    </Tooltip>
+                  </div>
+                )
+              })
             }
           </div>
+          {nSelected > 0 && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>
+              Click checkboxes to select · Run will process only selected files
+            </div>
+          )}
         </div>
       </div>
 
@@ -664,7 +774,7 @@ export default function Clips() {
             cursor: runBusy ? 'not-allowed' : 'pointer', opacity: runBusy ? .4 : 1,
           }}>
             <Play size={12} fill="currentColor" />
-            {runBusy ? 'Running…' : 'Run'}
+            {runBusy ? 'Running…' : runLabel}
           </button>
         </div>
 
@@ -802,7 +912,7 @@ export default function Clips() {
               <Toggle on={speedRamp} onToggle={() => setSpeedRamp(p => !p)} label="Speed variation" />
             </div>
           </Tooltip>
-          <Tooltip text="Squish / stretch video to fill the target ratio — no cropping, keeps every pixel">
+          <Tooltip text="Squish / stretch video to fill the target ratio instead of cropping — keeps every pixel but distorts proportions">
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Maximize2 size={11} color={stretch ? 'var(--accent)' : 'var(--text-3)'} />
               <Toggle on={stretch} onToggle={() => setStretch(p => !p)} label="Stretch to fit" />
@@ -813,6 +923,17 @@ export default function Clips() {
               <Layers size={11} color={mixSources ? 'var(--accent)' : 'var(--text-3)'} />
               <Toggle on={mixSources} onToggle={() => setMixSources(p => !p)} label="Mix sources" />
             </div>
+          </Tooltip>
+        </div>
+
+        {/* delete source row */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap',
+          paddingTop: 12, marginTop: 4, borderTop: '1px solid var(--border)',
+        }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-3)', whiteSpace: 'nowrap' }}>After run</span>
+          <Tooltip text="Delete source file(s) after clips are generated successfully — frees up disk space">
+            <Toggle on={deleteSourceAfter} onToggle={() => setDeleteSourceAfter(p => !p)} label="Delete source after processing" />
           </Tooltip>
         </div>
       </div>
@@ -868,7 +989,6 @@ export default function Clips() {
                 </div>
               </div>
             )}
-            {/* detect from uploaded audio */}
             <div>
               <div className="label" style={{ marginBottom: 6, visibility: 'hidden' }}>·</div>
               <label style={{
@@ -882,7 +1002,6 @@ export default function Clips() {
                   onChange={e => { const f = e.target.files?.[0]; if (f) analyzeAudio(f); e.target.value = '' }} />
               </label>
             </div>
-            {/* detect from source video */}
             <div>
               <div className="label" style={{ marginBottom: 6, visibility: 'hidden' }}>·</div>
               <Tooltip text={sources.length === 0 ? 'Load a source video first' : 'Extract audio from source video and detect BPM automatically'}>
@@ -953,6 +1072,34 @@ export default function Clips() {
               {latest.total_mb} MB
             </span>
             <div style={{ flex: 1 }} />
+
+            {/* bulk select toggle */}
+            <Tooltip text={selectClipsMode ? 'Exit select mode' : 'Select clips to delete in bulk'}>
+              <button onClick={() => { setSelectClipsMode(p => !p); setSelectedClips(new Set()) }} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '4px 10px', borderRadius: 5,
+                border: `1px solid ${selectClipsMode ? 'rgba(129,140,248,0.4)' : 'var(--border)'}`,
+                background: selectClipsMode ? 'rgba(129,140,248,0.1)' : 'transparent',
+                color: selectClipsMode ? 'var(--accent)' : 'var(--text-3)',
+                fontSize: 11, fontFamily: 'var(--font-ui)', cursor: 'pointer',
+              }}>
+                <CheckSquare size={11} /> {selectClipsMode ? 'Cancel' : 'Select'}
+              </button>
+            </Tooltip>
+
+            {/* delete selected */}
+            {selectClipsMode && selectedClips.size > 0 && (
+              <button onClick={deleteSelectedClips} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '4px 10px', borderRadius: 5,
+                border: '1px solid rgba(239,68,68,0.3)',
+                background: 'rgba(239,68,68,0.1)', color: 'var(--red)',
+                fontSize: 11, fontFamily: 'var(--font-ui)', cursor: 'pointer',
+              }}>
+                <Trash2 size={11} /> Delete {selectedClips.size}
+              </button>
+            )}
+
             <Tooltip text="Download all clips in this folder as a ZIP file">
               <a
                 href={`/api/clips/${encodeURIComponent(latest.folder)}/zip`}
